@@ -1,0 +1,78 @@
+// Функция для извлечения данных из любого документа
+function extractVideoDataFromDocument(doc) {
+  const script = doc.querySelector('script[type="application/ld+json"]');
+  if (script) {
+    try {
+      const data = JSON.parse(script.textContent);
+      return {
+        title: data.name,
+        contentUrl: data.contentUrl?.replace(/&amp;/g, '&')
+      };
+    } catch (e) {
+      console.error('Ошибка при парсинге JSON-LD:', e);
+    }
+  }
+  return null;
+}
+
+// Проверяем основной документ
+function extractVideoData() {
+  return extractVideoDataFromDocument(document);
+}
+
+// Функция для получения содержимого iframe через fetch
+async function fetchIframeContent() {
+  const iframe = document.querySelector('iframe[src*="kinescope.io"]');
+  if (!iframe) return null;
+
+  try {
+    const response = await fetch(iframe.src);
+    const html = await response.text();
+    const parser = new DOMParser();
+    return parser.parseFromString(html, 'text/html');
+  } catch (e) {
+    console.error('Ошибка при загрузке iframe:', e);
+    return null;
+  }
+}
+
+// Основная функция
+async function generateFFmpegCommand() {
+  // Пробуем получить данные из основного документа
+  let videoData = extractVideoData();
+
+  // Если не найдено, пробуем через iframe
+  if (!videoData?.contentUrl) {
+    const iframeDoc = await fetchIframeContent();
+    if (iframeDoc) {
+      videoData = extractVideoDataFromDocument(iframeDoc);
+    }
+  }
+
+  // Если всё равно нет данных, пробуем из параметров URL
+  if (!videoData?.contentUrl) {
+    const iframe = document.querySelector('iframe[src*="kinescope.io"]');
+    const videoId = new URL(iframe.src).searchParams.get('video_id');
+    if (videoId) {
+      videoData = {
+        title: `video_${videoId}`,
+        contentUrl: `https://cdn.kinescope.io/${videoId}/master.m3u8`
+      };
+    }
+  }
+
+  // Формируем команду
+  if (videoData?.contentUrl) {
+    const command = `ffmpeg -headers "Referer: https://kinescope.io/" -user_agent "Mozilla/5.0" -i "${videoData.contentUrl}" -c copy -bsf:a aac_adtstoasc "${videoData.title}.mp4"`;
+    console.log(command);
+    return command;
+  } else {
+    console.log('Данные для скачивания не найдены.');
+    return null;
+  }
+}
+
+// Запускаем асинхронно
+(async () => {
+  await generateFFmpegCommand();
+})();
